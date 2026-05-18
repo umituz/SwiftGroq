@@ -155,6 +155,11 @@ struct GroqConfigurationTests {
         let source = GroqAPIKeySource.key("")
         #expect(source.resolve() == nil)
     }
+
+    @Test("isConfigured reflects configuration state")
+    func isConfiguredState() {
+        #expect(!GroqClient.isConfigured)
+    }
 }
 
 @Suite("GroqError Tests")
@@ -181,6 +186,27 @@ struct GroqErrorTests {
             #expect(error.errorDescription != nil)
             #expect(!error.errorDescription!.isEmpty)
         }
+    }
+
+    @Test("Recovery suggestions are provided for actionable errors")
+    func recoverySuggestions() {
+        let withSuggestion: [GroqError] = [
+            .missingAPIKey, .unauthorized, .rateLimited(retryAfter: 10),
+            .networkError(NSError(domain: "test", code: -1)),
+            .requestTimedOut
+        ]
+        for error in withSuggestion {
+            #expect(error.recoverySuggestion != nil)
+            #expect(!error.recoverySuggestion!.isEmpty)
+        }
+    }
+
+    @Test("Configuration errors are identified")
+    func configurationErrors() {
+        #expect(GroqError.missingAPIKey.isConfigurationError)
+        #expect(GroqError.unauthorized.isConfigurationError)
+        #expect(!GroqError.rateLimited(retryAfter: nil).isConfigurationError)
+        #expect(!GroqError.networkError(NSError(domain: "test", code: -1)).isConfigurationError)
     }
 }
 

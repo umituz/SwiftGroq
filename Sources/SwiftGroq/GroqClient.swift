@@ -98,6 +98,11 @@ public final class GroqClient: Sendable {
 
     private static var _configuredInstance: GroqClient?
 
+    public static var isConfigured: Bool {
+        guard let instance = _configuredInstance else { return false }
+        return !instance.configuration.apiKey.isEmpty
+    }
+
     public static func configure(
         _ configuration: GroqConfiguration,
         rateLimiter: GroqRateLimiter = .shared,
@@ -134,7 +139,10 @@ public final class GroqClient: Sendable {
     }
 
     public static var configured: GroqClient {
-        _configuredInstance ?? shared
+        if let instance = _configuredInstance {
+            return instance
+        }
+        return shared
     }
 
     // MARK: - Chat Completion

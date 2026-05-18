@@ -20,13 +20,13 @@ public enum GroqError: LocalizedError, Sendable {
         case .invalidURL:
             return "Invalid API URL."
         case .unauthorized:
-            return "Invalid API key."
+            return "Invalid API key. Check your Groq API key in console.groq.com."
         case .rateLimited:
-            return "Rate limit reached. Please try again later."
+            return "Rate limit reached. Please try again in a moment."
         case .insufficientQuota:
-            return "API quota exceeded."
+            return "API quota exceeded. Check your plan at console.groq.com."
         case .serverError(let code):
-            return "Server error (HTTP \(code))."
+            return "Server error (HTTP \(code)). The service may be temporarily unavailable."
         case .networkError(let error):
             return "Network error: \(error.localizedDescription)"
         case .invalidResponse:
@@ -36,13 +36,50 @@ public enum GroqError: LocalizedError, Sendable {
         case .decodingFailed(let error):
             return "Failed to decode response: \(error.localizedDescription)"
         case .requestTimedOut:
-            return "Request timed out."
+            return "Request timed out. Check your internet connection and try again."
+        }
+    }
+
+    public var recoverySuggestion: String? {
+        switch self {
+        case .missingAPIKey:
+            return "Configure the API key using GroqClient.configure(apiKeySource:) before making requests."
+        case .unauthorized:
+            return "Verify your API key is correct at console.groq.com/keys."
+        case .rateLimited(let retryAfter):
+            if let seconds = retryAfter {
+                return "Wait \(seconds) seconds before retrying."
+            }
+            return "Wait a moment before retrying."
+        case .insufficientQuota:
+            return "Upgrade your plan or wait for quota renewal at console.groq.com."
+        case .serverError:
+            return "This is a server-side issue. Try again later."
+        case .networkError:
+            return "Check your internet connection and try again."
+        case .requestTimedOut:
+            return "Check your internet connection or try with a shorter prompt."
+        case .invalidResponse, .emptyResponse:
+            return "Try rephrasing your prompt or try again."
+        case .decodingFailed:
+            return "The AI response format was unexpected. Try again or adjust your prompt."
+        case .invalidURL:
+            return nil
         }
     }
 
     public var isRetryable: Bool {
         switch self {
         case .rateLimited, .serverError, .networkError, .requestTimedOut:
+            return true
+        default:
+            return false
+        }
+    }
+
+    public var isConfigurationError: Bool {
+        switch self {
+        case .missingAPIKey, .unauthorized:
             return true
         default:
             return false
