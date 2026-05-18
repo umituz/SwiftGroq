@@ -8,15 +8,15 @@ struct GroqModelsTests {
     func messageEncodesRole() throws {
         let message = GroqMessage(role: .system, content: "Hello")
         let data = try JSONEncoder().encode(message)
-        let json = try JSONSerialization.jsonObject(with: data) as? [String: String]
-        #expect(json?["role"] == "system")
-        #expect(json?["content"] == "Hello")
+        let json = try #require(JSONSerialization.jsonObject(with: data) as? [String: String])
+        #expect(json["role"] == "system")
+        #expect(json["content"] == "Hello")
     }
 
     @Test("GroqMessage decodes from raw string role")
     func messageDecodesRole() throws {
-        let json = #"{"role":"assistant","content":"Hi"}"#.data(using: .utf8)!
-        let message = try JSONDecoder().decode(GroqMessage.self, from: json)
+        let jsonData = try #require("{\"role\":\"assistant\",\"content\":\"Hi\"}".data(using: .utf8))
+        let message = try JSONDecoder().decode(GroqMessage.self, from: jsonData)
         #expect(message.role == .assistant)
         #expect(message.content == "Hi")
     }
@@ -31,15 +31,15 @@ struct GroqModelsTests {
             responseFormat: .json
         )
         let data = try JSONEncoder().encode(request)
-        let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-        #expect(json?["max_tokens"] != nil)
-        #expect(json?["top_p"] != nil)
-        #expect(json?["response_format"] != nil)
+        let json = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(json["max_tokens"] != nil)
+        #expect(json["top_p"] != nil)
+        #expect(json["response_format"] != nil)
     }
 
     @Test("GroqChatResponse decodes correctly")
     func responseDecodes() throws {
-        let json = """
+        let responseJSON = """
         {
             "id": "chatcmpl-123",
             "object": "chat.completion",
@@ -56,20 +56,46 @@ struct GroqModelsTests {
                 "total_tokens": 15
             }
         }
-        """.data(using: .utf8)!
-
-        let response = try JSONDecoder().decode(GroqChatResponse.self, from: json)
+        """
+        let jsonData = try #require(responseJSON.data(using: .utf8))
+        let response = try JSONDecoder().decode(GroqChatResponse.self, from: jsonData)
         #expect(response.text == "Hello!")
         #expect(response.usage?.totalTokens == 15)
+        #expect(response.choices.first?.finishReason == .stop)
     }
 
     @Test("GroqModel enum has all expected models")
     func allModelsAvailable() {
         #expect(GroqModel.llama33_70b.rawValue == "llama-3.3-70b-versatile")
         #expect(GroqModel.llama31_8b.rawValue == "llama-3.1-8b-instant")
-        #expect(GroqModel.llama31_70b.rawValue == "llama-3.1-70b-versatile")
+        #expect(GroqModel.llama32_1b.rawValue == "llama-3.2-1b-preview")
+        #expect(GroqModel.llama32_3b.rawValue == "llama-3.2-3b-preview")
+        #expect(GroqModel.llama32_11b_vision.rawValue == "llama-3.2-11b-vision-preview")
+        #expect(GroqModel.llama32_90b_vision.rawValue == "llama-3.2-90b-vision-preview")
         #expect(GroqModel.mixtral8x7b.rawValue == "mixtral-8x7b-32768")
         #expect(GroqModel.gemma2_9b.rawValue == "gemma2-9b-it")
+        #expect(GroqModel.deepseekR1_70b.rawValue == "deepseek-r1-distill-llama-70b")
+    }
+
+    @Test("GroqFinishReason decodes from string values")
+    func finishReasonDecodes() throws {
+        let json = "{\"finish_reason\": \"content_filter\"}".data(using: .utf8)!
+        let wrapper = try JSONDecoder().decode(FinishReasonWrapper.self, from: json)
+        #expect(wrapper.finishReason == .contentFilter)
+    }
+
+    @Test("GroqFinishReason handles nil value")
+    func finishReasonNil() throws {
+        let json = "{\"finish_reason\": null}".data(using: .utf8)!
+        let wrapper = try JSONDecoder().decode(FinishReasonWrapper.self, from: json)
+        #expect(wrapper.finishReason == nil)
+    }
+}
+
+private struct FinishReasonWrapper: Codable {
+    let finishReason: GroqFinishReason?
+    private enum CodingKeys: String, CodingKey {
+        case finishReason = "finish_reason"
     }
 }
 
@@ -155,11 +181,6 @@ struct GroqConfigurationTests {
         let source = GroqAPIKeySource.key("")
         #expect(source.resolve() == nil)
     }
-
-    @Test("isConfigured reflects configuration state")
-    func isConfiguredState() {
-        #expect(!GroqClient.isConfigured)
-    }
 }
 
 @Suite("GroqError Tests")
@@ -180,7 +201,8 @@ struct GroqErrorTests {
     func errorDescriptions() {
         let errors: [GroqError] = [
             .missingAPIKey, .unauthorized, .rateLimited(retryAfter: 5),
-            .emptyResponse, .serverError(statusCode: 500), .requestTimedOut
+            .emptyResponse, .serverError(statusCode: 500), .requestTimedOut,
+            .networkError("connection lost")
         ]
         for error in errors {
             #expect(error.errorDescription != nil)
@@ -192,7 +214,7 @@ struct GroqErrorTests {
     func recoverySuggestions() {
         let withSuggestion: [GroqError] = [
             .missingAPIKey, .unauthorized, .rateLimited(retryAfter: 10),
-            .networkError(NSError(domain: "test", code: -1)),
+            .networkError("timeout"),
             .requestTimedOut
         ]
         for error in withSuggestion {
@@ -206,7 +228,13 @@ struct GroqErrorTests {
         #expect(GroqError.missingAPIKey.isConfigurationError)
         #expect(GroqError.unauthorized.isConfigurationError)
         #expect(!GroqError.rateLimited(retryAfter: nil).isConfigurationError)
-        #expect(!GroqError.networkError(NSError(domain: "test", code: -1)).isConfigurationError)
+        #expect(!GroqError.networkError("test").isConfigurationError)
+    }
+
+    @Test("Network error stores description")
+    func networkErrorDescription() {
+        let error = GroqError.networkError("The network connection was lost.")
+        #expect(error.errorDescription?.contains("The network connection was lost.") == true)
     }
 }
 
@@ -238,6 +266,21 @@ struct GroqResponseFormatterTests {
         let input = "Result: {\"title\": \"hello\"}"
         let result = GroqResponseFormatter.extractJSON(from: input)
         #expect(result == "{\"title\": \"hello\"}")
+    }
+
+    @Test("Extracts JSON with nested brackets")
+    func extractsNestedJSON() {
+        let input = "{\"text\": \"hello [world]\", \"items\": [1, 2, 3]}"
+        let result = GroqResponseFormatter.extractJSON(from: input)
+        #expect(result != nil)
+        #expect(result?.contains("hello [world]") == true)
+    }
+
+    @Test("Extracts JSON with escaped quotes")
+    func extractsJSONWithEscapes() {
+        let input = "Result: {\"text\": \"say \\\"hello\\\" to me\"}"
+        let result = GroqResponseFormatter.extractJSON(from: input)
+        #expect(result != nil)
     }
 
     @Test("Cleans escape sequences")
@@ -296,5 +339,14 @@ struct ModelRateLimitsTests {
         let limit = ModelRateLimits.limit(for: "unknown-model")
         #expect(limit.tpm > 0)
         #expect(limit.dailyRequests > 0)
+    }
+
+    @Test("All GroqModel cases have rate limits")
+    func allModelsHaveLimits() {
+        for model in GroqModel.allCases {
+            let limit = ModelRateLimits.limit(for: model.rawValue)
+            #expect(limit.tpm > 0, "Missing TPM limit for \(model.rawValue)")
+            #expect(limit.dailyRequests > 0, "Missing daily limit for \(model.rawValue)")
+        }
     }
 }

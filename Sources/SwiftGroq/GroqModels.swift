@@ -1,7 +1,5 @@
 import Foundation
 
-// MARK: - Chat Message
-
 public struct GroqMessage: Codable, Equatable, Sendable {
     public let role: GroqRole
     public let content: String
@@ -29,15 +27,18 @@ public struct GroqMessage: Codable, Equatable, Sendable {
     }
 }
 
-// MARK: - Message Role
-
 public enum GroqRole: String, Codable, Sendable, CaseIterable {
     case system
     case user
     case assistant
 }
 
-// MARK: - Chat Request
+public enum GroqFinishReason: String, Codable, Sendable {
+    case stop
+    case length
+    case contentFilter = "content_filter"
+    case toolCalls = "tool_calls"
+}
 
 public struct GroqChatRequest: Codable, Sendable {
     public let model: String
@@ -74,8 +75,6 @@ public struct GroqChatRequest: Codable, Sendable {
     }
 }
 
-// MARK: - Response Format
-
 public struct GroqResponseFormat: Codable, Equatable, Sendable {
     public let type: String
 
@@ -86,8 +85,6 @@ public struct GroqResponseFormat: Codable, Equatable, Sendable {
         self.type = type
     }
 }
-
-// MARK: - Chat Response
 
 public struct GroqChatResponse: Codable, Sendable {
     public let id: String
@@ -102,20 +99,16 @@ public struct GroqChatResponse: Codable, Sendable {
     }
 }
 
-// MARK: - Choice
-
 public struct GroqChoice: Codable, Sendable {
     public let index: Int
     public let message: GroqMessage
-    public let finishReason: String?
+    public let finishReason: GroqFinishReason?
 
     private enum CodingKeys: String, CodingKey {
         case index, message
         case finishReason = "finish_reason"
     }
 }
-
-// MARK: - Token Usage
 
 public struct GroqUsage: Codable, Sendable {
     public let promptTokens: Int
@@ -133,12 +126,14 @@ public struct GroqUsage: Codable, Sendable {
     }
 }
 
-// MARK: - Model Identifier
-
 public enum GroqModel: String, Sendable, CaseIterable {
     case llama33_70b = "llama-3.3-70b-versatile"
     case llama31_8b = "llama-3.1-8b-instant"
-    case llama31_70b = "llama-3.1-70b-versatile"
+    case llama32_1b = "llama-3.2-1b-preview"
+    case llama32_3b = "llama-3.2-3b-preview"
+    case llama32_11b_vision = "llama-3.2-11b-vision-preview"
+    case llama32_90b_vision = "llama-3.2-90b-vision-preview"
     case mixtral8x7b = "mixtral-8x7b-32768"
     case gemma2_9b = "gemma2-9b-it"
+    case deepseekR1_70b = "deepseek-r1-distill-llama-70b"
 }

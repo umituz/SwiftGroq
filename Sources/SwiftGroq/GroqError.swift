@@ -7,7 +7,7 @@ public enum GroqError: LocalizedError, Sendable {
     case rateLimited(retryAfter: Int?)
     case insufficientQuota
     case serverError(statusCode: Int)
-    case networkError(Error)
+    case networkError(String)
     case invalidResponse
     case emptyResponse
     case decodingFailed(Error)
@@ -27,8 +27,8 @@ public enum GroqError: LocalizedError, Sendable {
             return "API quota exceeded. Check your plan at console.groq.com."
         case .serverError(let code):
             return "Server error (HTTP \(code)). The service may be temporarily unavailable."
-        case .networkError(let error):
-            return "Network error: \(error.localizedDescription)"
+        case .networkError(let description):
+            return "Network error: \(description)"
         case .invalidResponse:
             return "Invalid response from server."
         case .emptyResponse:

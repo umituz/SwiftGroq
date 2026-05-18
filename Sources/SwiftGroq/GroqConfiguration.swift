@@ -1,6 +1,5 @@
 import Foundation
-
-// MARK: - Configuration
+import Security
 
 public struct GroqConfiguration: Sendable {
     public let apiKey: String
@@ -26,8 +25,6 @@ public struct GroqConfiguration: Sendable {
         self.timeoutInterval = timeoutInterval
     }
 }
-
-// MARK: - API Key Sources
 
 public enum GroqAPIKeySource {
     case key(String)
@@ -56,11 +53,9 @@ public enum GroqAPIKeySource {
     }
 }
 
-// MARK: - Keychain Helper
-
 enum KeychainHelper {
-    static func save(key: String, value: String) {
-        guard let data = value.data(using: .utf8) else { return }
+    static func save(key: String, value: String) -> Bool {
+        guard let data = value.data(using: .utf8) else { return false }
 
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -73,7 +68,8 @@ enum KeychainHelper {
             kSecAttrAccount as String: key,
             kSecValueData as String: data
         ]
-        SecItemAdd(attributes as CFDictionary, nil)
+        let status = SecItemAdd(attributes as CFDictionary, nil)
+        return status == errSecSuccess
     }
 
     static func load(key: String) -> String? {
@@ -90,11 +86,12 @@ enum KeychainHelper {
         return String(data: data, encoding: .utf8)
     }
 
-    static func delete(key: String) {
+    static func delete(key: String) -> Bool {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrAccount as String: key
         ]
-        SecItemDelete(query as CFDictionary)
+        let status = SecItemDelete(query as CFDictionary)
+        return status == errSecSuccess || status == errSecItemNotFound
     }
 }

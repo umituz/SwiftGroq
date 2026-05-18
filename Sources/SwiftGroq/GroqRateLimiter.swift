@@ -15,17 +15,20 @@ public actor GroqRateLimiter {
 
     private let maxRequestsPerMinute: Int
     private let maxTokensPerMinute: Int
-    private let minRequestInterval: TimeInterval
+
+    private static let dateFactory: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withFullDate]
+        return formatter
+    }()
 
     public init(
         maxRequestsPerMinute: Int = 30,
-        maxTokensPerMinute: Int = 12000,
-        minRequestInterval: TimeInterval = 0.5
+        maxTokensPerMinute: Int = 12000
     ) {
         self.maxRequestsPerMinute = maxRequestsPerMinute
         self.maxTokensPerMinute = maxTokensPerMinute
-        self.minRequestInterval = minRequestInterval
-        self.lastResetDate = Self.todayString()
+        self.lastResetDate = Self.dateFactory.string(from: Date())
     }
 
     public func canMakeRequest(model: String = "", estimatedTokens: Int = 0) -> Bool {
@@ -96,17 +99,11 @@ public actor GroqRateLimiter {
     }
 
     private func resetDailyIfNeeded() {
-        let today = Self.todayString()
+        let today = Self.dateFactory.string(from: Date())
         if today != lastResetDate {
             dailyRequestCounts.removeAll()
             lastResetDate = today
         }
-    }
-
-    private static func todayString() -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter.string(from: Date())
     }
 }
 
@@ -120,12 +117,20 @@ public struct ModelRateLimits: Sendable {
             return ModelRateLimits(tpm: 12000, dailyRequests: 6000)
         case GroqModel.llama31_8b.rawValue:
             return ModelRateLimits(tpm: 6000, dailyRequests: 6000)
-        case GroqModel.llama31_70b.rawValue:
+        case GroqModel.llama32_1b.rawValue:
+            return ModelRateLimits(tpm: 6000, dailyRequests: 6000)
+        case GroqModel.llama32_3b.rawValue:
+            return ModelRateLimits(tpm: 6000, dailyRequests: 6000)
+        case GroqModel.llama32_11b_vision.rawValue:
+            return ModelRateLimits(tpm: 12000, dailyRequests: 6000)
+        case GroqModel.llama32_90b_vision.rawValue:
             return ModelRateLimits(tpm: 12000, dailyRequests: 6000)
         case GroqModel.mixtral8x7b.rawValue:
             return ModelRateLimits(tpm: 6000, dailyRequests: 6000)
         case GroqModel.gemma2_9b.rawValue:
             return ModelRateLimits(tpm: 6000, dailyRequests: 6000)
+        case GroqModel.deepseekR1_70b.rawValue:
+            return ModelRateLimits(tpm: 12000, dailyRequests: 6000)
         default:
             return ModelRateLimits(tpm: 12000, dailyRequests: 6000)
         }
