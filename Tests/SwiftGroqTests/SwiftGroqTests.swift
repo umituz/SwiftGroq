@@ -62,6 +62,15 @@ struct GroqModelsTests {
         #expect(response.text == "Hello!")
         #expect(response.usage?.totalTokens == 15)
     }
+
+    @Test("GroqModel enum has all expected models")
+    func allModelsAvailable() {
+        #expect(GroqModel.llama33_70b.rawValue == "llama-3.3-70b-versatile")
+        #expect(GroqModel.llama31_8b.rawValue == "llama-3.1-8b-instant")
+        #expect(GroqModel.llama31_70b.rawValue == "llama-3.1-70b-versatile")
+        #expect(GroqModel.mixtral8x7b.rawValue == "mixtral-8x7b-32768")
+        #expect(GroqModel.gemma2_9b.rawValue == "gemma2-9b-it")
+    }
 }
 
 @Suite("GroqPromptSanitizer Tests")
@@ -116,6 +125,12 @@ struct GroqRetryPolicyTests {
         let delay1 = policy.delay(for: 1)
         #expect(delay1 > delay0)
     }
+
+    @Test("None policy never retries")
+    func noneNeverRetries() {
+        let policy = GroqRetryPolicy.none
+        #expect(!policy.shouldRetry(error: .rateLimited(retryAfter: nil), attempt: 0))
+    }
 }
 
 @Suite("GroqConfiguration Tests")
@@ -166,5 +181,94 @@ struct GroqErrorTests {
             #expect(error.errorDescription != nil)
             #expect(!error.errorDescription!.isEmpty)
         }
+    }
+}
+
+@Suite("GroqResponseFormatter Tests")
+struct GroqResponseFormatterTests {
+    @Test("Strips SQL markdown code blocks")
+    func stripsSQL() {
+        let input = "```sql\nSELECT * FROM users;\n```"
+        let result = GroqResponseFormatter.stripMarkdownCodeBlocks(input)
+        #expect(result == "SELECT * FROM users;")
+    }
+
+    @Test("Strips JSON markdown code blocks")
+    func stripsJSON() {
+        let input = "```json\n{\"key\": \"value\"}\n```"
+        let result = GroqResponseFormatter.stripMarkdownCodeBlocks(input)
+        #expect(result == "{\"key\": \"value\"}")
+    }
+
+    @Test("Extracts JSON array from text")
+    func extractsJSONArray() {
+        let input = "Here are the results:\n[{\"name\": \"test\"}]\nDone."
+        let result = GroqResponseFormatter.extractJSON(from: input)
+        #expect(result == "[{\"name\": \"test\"}]")
+    }
+
+    @Test("Extracts JSON object from text")
+    func extractsJSONObject() {
+        let input = "Result: {\"title\": \"hello\"}"
+        let result = GroqResponseFormatter.extractJSON(from: input)
+        #expect(result == "{\"title\": \"hello\"}")
+    }
+
+    @Test("Cleans escape sequences")
+    func cleansEscapes() {
+        let input = "Line 1\\nLine 2\\r"
+        let result = GroqResponseFormatter.cleanResponse(input)
+        #expect(result == "Line 1\nLine 2")
+    }
+}
+
+@Suite("GroqTokenEstimator Tests")
+struct GroqTokenEstimatorTests {
+    @Test("Estimates tokens from text")
+    func estimatesTokens() {
+        let result = GroqTokenEstimator.estimate(text: "Hello world this is a test")
+        #expect(result > 0)
+    }
+
+    @Test("Estimates request usage")
+    func estimatesRequestUsage() {
+        let usage = GroqTokenEstimator.estimateRequest(
+            systemPrompt: "You are helpful",
+            history: [GroqMessage(role: .user, content: "Hi")],
+            userMessage: "Hello"
+        )
+        #expect(usage.inputTokens > 0)
+        #expect(usage.outputTokens == 0)
+        #expect(usage.totalTokens == usage.inputTokens)
+    }
+
+    @Test("Estimates full usage with response")
+    func estimatesFullUsage() {
+        let usage = GroqTokenEstimator.estimateFullUsage(
+            systemPrompt: "System",
+            history: [],
+            userMessage: "Hi",
+            response: "Hello there, how can I help you today?"
+        )
+        #expect(usage.inputTokens > 0)
+        #expect(usage.outputTokens > 0)
+        #expect(usage.totalTokens == usage.inputTokens + usage.outputTokens)
+    }
+}
+
+@Suite("ModelRateLimits Tests")
+struct ModelRateLimitsTests {
+    @Test("Known models have limits")
+    func knownModelLimits() {
+        let limit = ModelRateLimits.limit(for: GroqModel.llama33_70b.rawValue)
+        #expect(limit.tpm > 0)
+        #expect(limit.dailyRequests > 0)
+    }
+
+    @Test("Unknown model gets default limits")
+    func unknownModelDefaults() {
+        let limit = ModelRateLimits.limit(for: "unknown-model")
+        #expect(limit.tpm > 0)
+        #expect(limit.dailyRequests > 0)
     }
 }
