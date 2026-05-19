@@ -31,7 +31,6 @@ public enum GroqAPIKeySource {
     case environment(variable: String = "GROQ_API_KEY")
     case infoPlist(key: String = "GROQ_API_KEY")
     case keychain(account: String = "com.umituz.swiftgroq")
-    case xcconfig(key: String = "GROQ_API_KEY")
 
     public func resolve() -> String? {
         switch self {
@@ -46,9 +45,6 @@ public enum GroqAPIKeySource {
 
         case .keychain(let account):
             return KeychainHelper.load(key: account)
-
-        case .xcconfig(let key):
-            return Bundle.main.infoDictionary?[key] as? String
         }
     }
 }

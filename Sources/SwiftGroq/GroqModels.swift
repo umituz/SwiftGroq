@@ -75,13 +75,18 @@ public struct GroqChatRequest: Codable, Sendable {
     }
 }
 
+public enum GroqResponseFormatType: String, Codable, Sendable, CaseIterable {
+    case json = "json_object"
+    case text = "text"
+}
+
 public struct GroqResponseFormat: Codable, Equatable, Sendable {
-    public let type: String
+    public let type: GroqResponseFormatType
 
-    public static let json = GroqResponseFormat(type: "json_object")
-    public static let text = GroqResponseFormat(type: "text")
+    public static let json = GroqResponseFormat(type: .json)
+    public static let text = GroqResponseFormat(type: .text)
 
-    public init(type: String) {
+    public init(type: GroqResponseFormatType) {
         self.type = type
     }
 }
@@ -136,4 +141,28 @@ public enum GroqModel: String, Sendable, CaseIterable {
     case mixtral8x7b = "mixtral-8x7b-32768"
     case gemma2_9b = "gemma2-9b-it"
     case deepseekR1_70b = "deepseek-r1-distill-llama-70b"
+}
+
+public struct GroqStreamChunk: Codable, Sendable {
+    public let id: String
+    public let object: String
+    public let created: Int
+    public let model: String
+    public let choices: [GroqChunkChoice]
+}
+
+public struct GroqChunkChoice: Codable, Sendable {
+    public let index: Int
+    public let delta: GroqDelta
+    public let finishReason: GroqFinishReason?
+
+    private enum CodingKeys: String, CodingKey {
+        case index, delta
+        case finishReason = "finish_reason"
+    }
+}
+
+public struct GroqDelta: Codable, Sendable {
+    public let role: GroqRole?
+    public let content: String?
 }

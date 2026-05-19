@@ -49,7 +49,7 @@ public struct GroqRetryPolicy: Sendable {
         guard attempt < maxRetries else { return false }
 
         switch error {
-        case .rateLimited, .serverError, .networkError, .requestTimedOut:
+        case .rateLimited, .serverError, .networkError, .requestTimedOut, .streamError:
             return true
         default:
             return false

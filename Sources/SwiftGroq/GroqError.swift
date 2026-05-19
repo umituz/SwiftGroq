@@ -1,6 +1,7 @@
 import Foundation
 
 public enum GroqError: LocalizedError, Sendable {
+    case notConfigured
     case missingAPIKey
     case invalidURL
     case unauthorized
@@ -12,9 +13,12 @@ public enum GroqError: LocalizedError, Sendable {
     case emptyResponse
     case decodingFailed(Error)
     case requestTimedOut
+    case streamError(String)
 
     public var errorDescription: String? {
         switch self {
+        case .notConfigured:
+            return "GroqClient has not been configured."
         case .missingAPIKey:
             return "Groq API key is not configured."
         case .invalidURL:
@@ -37,11 +41,15 @@ public enum GroqError: LocalizedError, Sendable {
             return "Failed to decode response: \(error.localizedDescription)"
         case .requestTimedOut:
             return "Request timed out. Check your internet connection and try again."
+        case .streamError(let description):
+            return "Streaming error: \(description)"
         }
     }
 
     public var recoverySuggestion: String? {
         switch self {
+        case .notConfigured:
+            return "Call GroqClient.configure() before making requests."
         case .missingAPIKey:
             return "Configure the API key using GroqClient.configure(apiKeySource:) before making requests."
         case .unauthorized:
@@ -63,6 +71,8 @@ public enum GroqError: LocalizedError, Sendable {
             return "Try rephrasing your prompt or try again."
         case .decodingFailed:
             return "The AI response format was unexpected. Try again or adjust your prompt."
+        case .streamError:
+            return "The streaming connection was interrupted. Try again."
         case .invalidURL:
             return nil
         }
@@ -70,7 +80,7 @@ public enum GroqError: LocalizedError, Sendable {
 
     public var isRetryable: Bool {
         switch self {
-        case .rateLimited, .serverError, .networkError, .requestTimedOut:
+        case .rateLimited, .serverError, .networkError, .requestTimedOut, .streamError:
             return true
         default:
             return false
@@ -79,7 +89,7 @@ public enum GroqError: LocalizedError, Sendable {
 
     public var isConfigurationError: Bool {
         switch self {
-        case .missingAPIKey, .unauthorized:
+        case .notConfigured, .missingAPIKey, .unauthorized:
             return true
         default:
             return false

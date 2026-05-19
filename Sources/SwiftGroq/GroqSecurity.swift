@@ -1,9 +1,20 @@
 import Foundation
+import CryptoKit
 
 public final class GroqCertificatePinner: NSObject, URLSessionTaskDelegate, Sendable {
-    private let expectedHost = "api.groq.com"
+    public let pinnedHashes: Set<String>
+    private let expectedHost: String
 
     public static let shared = GroqCertificatePinner()
+
+    private convenience override init() {
+        self.init(host: "api.groq.com", pinnedHashes: [])
+    }
+
+    public init(host: String = "api.groq.com", pinnedHashes: Set<String>) {
+        self.expectedHost = host
+        self.pinnedHashes = pinnedHashes
+    }
 
     public func urlSession(
         _ session: URLSession,
@@ -21,12 +32,36 @@ public final class GroqCertificatePinner: NSObject, URLSessionTaskDelegate, Send
         SecTrustSetPolicies(serverTrust, policy)
 
         var error: CFError?
-        let isValid = SecTrustEvaluateWithError(serverTrust, &error)
-
-        if isValid {
-            completionHandler(.useCredential, URLCredential(trust: serverTrust))
-        } else {
+        guard SecTrustEvaluateWithError(serverTrust, &error) else {
             completionHandler(.cancelAuthenticationChallenge, nil)
+            return
         }
+
+        guard !pinnedHashes.isEmpty else {
+            completionHandler(.useCredential, URLCredential(trust: serverTrust))
+            return
+        }
+
+        guard let chain = SecTrustCopyCertificateChain(serverTrust) as? [SecCertificate] else {
+            completionHandler(.cancelAuthenticationChallenge, nil)
+            return
+        }
+
+        for certificate in chain {
+            guard let publicKey = SecCertificateCopyKey(certificate) else { continue }
+            let hash = spkiHash(for: publicKey)
+            if pinnedHashes.contains(hash) {
+                completionHandler(.useCredential, URLCredential(trust: serverTrust))
+                return
+            }
+        }
+
+        completionHandler(.cancelAuthenticationChallenge, nil)
+    }
+
+    private func spkiHash(for key: SecKey) -> String {
+        guard let data = SecKeyCopyExternalRepresentation(key, nil) else { return "" }
+        let hash = SHA256.hash(data: data as Data)
+        return Data(hash).base64EncodedString()
     }
 }

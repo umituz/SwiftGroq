@@ -18,7 +18,8 @@ public enum GroqResponseFormatter {
     }
 
     public static func extractJSON(from text: String) -> String? {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let stripped = stripMarkdownCodeBlocks(text)
+        let trimmed = stripped.trimmingCharacters(in: .whitespacesAndNewlines)
 
         let objectRange = findBalancedBrackets(in: trimmed, open: "{", close: "}")
         let arrayRange = findBalancedBrackets(in: trimmed, open: "[", close: "]")
@@ -47,7 +48,7 @@ public enum GroqResponseFormatter {
     }
 
     public static func cleanResponse(_ text: String) -> String {
-        var result = stripMarkdownCodeBlocks(text)
+        var result = text
         result = result.replacingOccurrences(of: "\\n", with: "\n")
         result = result.replacingOccurrences(of: "\\r", with: "")
         return result.trimmingCharacters(in: .whitespacesAndNewlines)

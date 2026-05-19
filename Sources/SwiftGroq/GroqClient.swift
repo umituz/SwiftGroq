@@ -57,11 +57,11 @@ public final class GroqClient: @unchecked Sendable {
         return !instance.configuration.apiKey.isEmpty
     }
 
-    public static var configured: GroqClient {
+    public static func configured() throws -> GroqClient {
         _lock.lock()
         defer { _lock.unlock() }
         guard let instance = _configuredInstance else {
-            fatalError("GroqClient.configure() must be called before accessing .configured")
+            throw GroqError.notConfigured
         }
         return instance
     }
@@ -96,6 +96,27 @@ public final class GroqClient: @unchecked Sendable {
         }
     }
 
+    public init(
+        configuration: GroqConfiguration,
+        rateLimiter: GroqRateLimiter = .shared,
+        retryPolicy: GroqRetryPolicy = .default,
+        certificatePinner: GroqCertificatePinner? = nil
+    ) {
+        self.configuration = configuration
+        self.rateLimiter = rateLimiter
+        self.retryPolicy = retryPolicy
+
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = configuration.timeoutInterval
+        config.waitsForConnectivity = true
+
+        if let pinner = certificatePinner {
+            self.session = URLSession(configuration: config, delegate: pinner, delegateQueue: nil)
+        } else {
+            self.session = URLSession(configuration: config)
+        }
+    }
+
     public static func configure(
         _ configuration: GroqConfiguration,
         rateLimiter: GroqRateLimiter = .shared,
@@ -110,6 +131,12 @@ public final class GroqClient: @unchecked Sendable {
             retryPolicy: retryPolicy,
             certificatePinning: certificatePinning
         )
+    }
+
+    public static func reset() {
+        _lock.lock()
+        defer { _lock.unlock() }
+        _configuredInstance = nil
     }
 
     public static func configure(
@@ -132,6 +159,8 @@ public final class GroqClient: @unchecked Sendable {
         )
         configure(config, certificatePinning: certificatePinning)
     }
+
+    // MARK: - Chat
 
     public func chat(
         messages: [GroqMessage],
@@ -287,6 +316,122 @@ public final class GroqClient: @unchecked Sendable {
         return try await executeWithRetry(request, model: resolvedModel)
     }
 
+    // MARK: - Streaming
+
+    public func chatStream(
+        messages: [GroqMessage],
+        model: String? = nil,
+        temperature: Double? = nil,
+        maxTokens: Int? = nil,
+        topP: Double? = nil,
+        responseFormat: GroqResponseFormat? = nil,
+        sanitizeInput: Bool = true
+    ) -> AsyncThrowingStream<String, Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    let resolvedModel = model ?? configuration.defaultModel
+                    let processedMessages = sanitizeInput
+                        ? messages.map { GroqMessage(role: $0.role, content: GroqPromptSanitizer.sanitize($0.content)) }
+                        : messages
+
+                    let request = GroqChatRequest(
+                        model: resolvedModel,
+                        messages: processedMessages,
+                        temperature: temperature ?? configuration.defaultTemperature,
+                        maxTokens: maxTokens ?? configuration.defaultMaxTokens,
+                        topP: topP ?? 1.0,
+                        stream: true,
+                        responseFormat: responseFormat
+                    )
+
+                    let tokenEstimate = estimateTokens(for: request.messages)
+                    try await rateLimiter.waitForAvailability(model: resolvedModel, estimatedTokens: tokenEstimate)
+
+                    let urlRequest = try buildURLRequest(from: request)
+                    let (bytes, response) = try await session.bytes(for: urlRequest)
+
+                    try validateHTTPResponse(response)
+
+                    for try await line in bytes.lines {
+                        guard !Task.isCancelled else { break }
+                        guard line.hasPrefix("data: ") else { continue }
+
+                        let payload = String(line.dropFirst(6))
+                        if payload.trimmingCharacters(in: .whitespaces) == "[DONE]" {
+                            break
+                        }
+
+                        guard let data = payload.data(using: .utf8),
+                              let chunk = try? JSONDecoder().decode(GroqStreamChunk.self, from: data),
+                              let content = chunk.choices.first?.delta.content else {
+                            continue
+                        }
+
+                        continuation.yield(content)
+                    }
+
+                    await rateLimiter.recordRequest(model: resolvedModel, tokenCount: tokenEstimate)
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+
+            continuation.onTermination = { _ in
+                task.cancel()
+            }
+        }
+    }
+
+    public func systemStream(
+        systemPrompt: String,
+        userMessage: String,
+        model: String? = nil,
+        temperature: Double? = nil,
+        maxTokens: Int? = nil,
+        topP: Double? = nil,
+        responseFormat: GroqResponseFormat? = nil
+    ) -> AsyncThrowingStream<String, Error> {
+        chatStream(
+            messages: [
+                GroqMessage(role: .system, content: systemPrompt),
+                GroqMessage(role: .user, content: userMessage)
+            ],
+            model: model,
+            temperature: temperature,
+            maxTokens: maxTokens,
+            topP: topP,
+            responseFormat: responseFormat
+        )
+    }
+
+    public func streamWithHistory(
+        systemPrompt: String,
+        history: [GroqMessage],
+        userMessage: String,
+        model: String? = nil,
+        temperature: Double? = nil,
+        maxTokens: Int? = nil,
+        topP: Double? = nil,
+        responseFormat: GroqResponseFormat? = nil
+    ) -> AsyncThrowingStream<String, Error> {
+        var messages: [GroqMessage] = [GroqMessage(role: .system, content: systemPrompt)]
+        messages.append(contentsOf: history)
+        messages.append(GroqMessage(role: .user, content: userMessage))
+
+        return chatStream(
+            messages: messages,
+            model: model,
+            temperature: temperature,
+            maxTokens: maxTokens,
+            topP: topP,
+            responseFormat: responseFormat
+        )
+    }
+
+    // MARK: - Private
+
     private func executeWithRetry(_ request: GroqChatRequest, model: String) async throws -> GroqChatResponse {
         var lastError: GroqError?
 
@@ -320,6 +465,28 @@ public final class GroqClient: @unchecked Sendable {
     }
 
     private func performRequest(_ request: GroqChatRequest) async throws -> GroqChatResponse {
+        let urlRequest = try buildURLRequest(from: request)
+
+        let (data, response): (Data, URLResponse)
+        do {
+            (data, response) = try await session.data(for: urlRequest)
+        } catch {
+            if let urlError = error as? URLError, urlError.code == .timedOut {
+                throw GroqError.requestTimedOut
+            }
+            throw GroqError.networkError(error.localizedDescription)
+        }
+
+        try validateHTTPResponse(response)
+
+        do {
+            return try JSONDecoder().decode(GroqChatResponse.self, from: data)
+        } catch {
+            throw GroqError.decodingFailed(error)
+        }
+    }
+
+    private func buildURLRequest(from request: GroqChatRequest) throws -> URLRequest {
         guard let url = URL(string: configuration.baseURL) else {
             throw GroqError.invalidURL
         }
@@ -336,16 +503,10 @@ public final class GroqClient: @unchecked Sendable {
             throw GroqError.invalidResponse
         }
 
-        let (data, response): (Data, URLResponse)
-        do {
-            (data, response) = try await session.data(for: urlRequest)
-        } catch {
-            if let urlError = error as? URLError, urlError.code == .timedOut {
-                throw GroqError.requestTimedOut
-            }
-            throw GroqError.networkError(error.localizedDescription)
-        }
+        return urlRequest
+    }
 
+    private func validateHTTPResponse(_ response: URLResponse) throws {
         guard let httpResponse = response as? HTTPURLResponse else {
             throw GroqError.invalidResponse
         }
@@ -362,12 +523,6 @@ public final class GroqClient: @unchecked Sendable {
             throw GroqError.rateLimited(retryAfter: retryAfter)
         default:
             throw GroqError.serverError(statusCode: httpResponse.statusCode)
-        }
-
-        do {
-            return try JSONDecoder().decode(GroqChatResponse.self, from: data)
-        } catch {
-            throw GroqError.decodingFailed(error)
         }
     }
 
