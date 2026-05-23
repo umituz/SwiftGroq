@@ -1,51 +1,5 @@
 import Foundation
 
-public struct GroqTokenUsage: Sendable {
-    public let inputTokens: Int
-    public let outputTokens: Int
-
-    public var totalTokens: Int { inputTokens + outputTokens }
-
-    public init(inputTokens: Int, outputTokens: Int) {
-        self.inputTokens = inputTokens
-        self.outputTokens = outputTokens
-    }
-}
-
-public enum GroqTokenEstimator {
-    public static func estimate(text: String) -> Int {
-        max(1, text.count / 4)
-    }
-
-    public static func estimateRequest(
-        systemPrompt: String,
-        history: [GroqMessage],
-        userMessage: String
-    ) -> GroqTokenUsage {
-        let input = estimate(text: systemPrompt)
-            + history.reduce(0) { $0 + estimate(text: $1.content) }
-            + estimate(text: userMessage)
-        return GroqTokenUsage(inputTokens: input, outputTokens: 0)
-    }
-
-    public static func estimateFullUsage(
-        systemPrompt: String,
-        history: [GroqMessage],
-        userMessage: String,
-        response: String
-    ) -> GroqTokenUsage {
-        let request = estimateRequest(
-            systemPrompt: systemPrompt,
-            history: history,
-            userMessage: userMessage
-        )
-        return GroqTokenUsage(
-            inputTokens: request.inputTokens,
-            outputTokens: estimate(text: response)
-        )
-    }
-}
-
 public final class GroqClient: @unchecked Sendable {
     private static let _lock = NSLock()
     private static var _configuredInstance: GroqClient?
@@ -70,41 +24,23 @@ public final class GroqClient: @unchecked Sendable {
     private let rateLimiter: GroqRateLimiter
     private let retryPolicy: GroqRetryPolicy
     private let session: URLSession
+    private let logger: GroqLogger
 
-    private init(
-        configuration: GroqConfiguration,
-        rateLimiter: GroqRateLimiter = .shared,
-        retryPolicy: GroqRetryPolicy = .default,
-        certificatePinning: Bool = false
-    ) {
-        self.configuration = configuration
-        self.rateLimiter = rateLimiter
-        self.retryPolicy = retryPolicy
-
-        let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = configuration.timeoutInterval
-        config.waitsForConnectivity = true
-
-        if certificatePinning {
-            self.session = URLSession(
-                configuration: config,
-                delegate: GroqCertificatePinner.shared,
-                delegateQueue: nil
-            )
-        } else {
-            self.session = URLSession(configuration: config)
-        }
+    deinit {
+        session.invalidateAndCancel()
     }
 
     public init(
         configuration: GroqConfiguration,
         rateLimiter: GroqRateLimiter = .shared,
         retryPolicy: GroqRetryPolicy = .default,
-        certificatePinner: GroqCertificatePinner? = nil
+        certificatePinner: GroqCertificatePinner? = nil,
+        logger: GroqLogger = .shared
     ) {
         self.configuration = configuration
         self.rateLimiter = rateLimiter
         self.retryPolicy = retryPolicy
+        self.logger = logger
 
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = configuration.timeoutInterval
@@ -121,22 +57,32 @@ public final class GroqClient: @unchecked Sendable {
         _ configuration: GroqConfiguration,
         rateLimiter: GroqRateLimiter = .shared,
         retryPolicy: GroqRetryPolicy = .default,
-        certificatePinning: Bool = false
+        certificatePinner: GroqCertificatePinner? = nil,
+        logger: GroqLogger = .shared
     ) {
         _lock.lock()
-        defer { _lock.unlock() }
+        let previousInstance = _configuredInstance
         _configuredInstance = GroqClient(
             configuration: configuration,
             rateLimiter: rateLimiter,
             retryPolicy: retryPolicy,
-            certificatePinning: certificatePinning
+            certificatePinner: certificatePinner,
+            logger: logger
         )
+        _lock.unlock()
+
+        previousInstance?.session.invalidateAndCancel()
+        logger.info("GroqClient configured with model: \(configuration.defaultModel)")
     }
 
     public static func reset() {
         _lock.lock()
-        defer { _lock.unlock() }
+        let previousInstance = _configuredInstance
         _configuredInstance = nil
+        _lock.unlock()
+
+        previousInstance?.session.invalidateAndCancel()
+        GroqLogger.shared.info("GroqClient reset")
     }
 
     public static func configure(
@@ -145,7 +91,7 @@ public final class GroqClient: @unchecked Sendable {
         temperature: Double = 0.7,
         maxTokens: Int = 1024,
         timeout: TimeInterval = 30.0,
-        certificatePinning: Bool = false
+        certificatePinner: GroqCertificatePinner? = nil
     ) throws {
         guard let apiKey = apiKeySource.resolve(), !apiKey.isEmpty else {
             throw GroqError.missingAPIKey
@@ -157,7 +103,7 @@ public final class GroqClient: @unchecked Sendable {
             defaultMaxTokens: maxTokens,
             timeoutInterval: timeout
         )
-        configure(config, certificatePinning: certificatePinning)
+        configure(config, certificatePinner: certificatePinner)
     }
 
     // MARK: - Chat
@@ -171,21 +117,16 @@ public final class GroqClient: @unchecked Sendable {
         responseFormat: GroqResponseFormat? = nil,
         sanitizeInput: Bool = true
     ) async throws -> String {
-        let resolvedModel = model ?? configuration.defaultModel
-        let processedMessages = sanitizeInput
-            ? messages.map { GroqMessage(role: $0.role, content: GroqPromptSanitizer.sanitize($0.content)) }
-            : messages
-
-        let request = GroqChatRequest(
-            model: resolvedModel,
-            messages: processedMessages,
-            temperature: temperature ?? configuration.defaultTemperature,
-            maxTokens: maxTokens ?? configuration.defaultMaxTokens,
-            topP: topP ?? 1.0,
-            responseFormat: responseFormat
+        let response = try await rawChat(
+            messages: messages,
+            model: model,
+            temperature: temperature,
+            maxTokens: maxTokens,
+            topP: topP,
+            responseFormat: responseFormat,
+            sanitizeInput: sanitizeInput
         )
 
-        let response: GroqChatResponse = try await executeWithRetry(request, model: resolvedModel)
         guard let text = response.text, !text.isEmpty else {
             throw GroqError.emptyResponse
         }
@@ -299,6 +240,8 @@ public final class GroqClient: @unchecked Sendable {
         responseFormat: GroqResponseFormat? = nil,
         sanitizeInput: Bool = true
     ) async throws -> GroqChatResponse {
+        try validateParameters(temperature: temperature, maxTokens: maxTokens, topP: topP)
+
         let resolvedModel = model ?? configuration.defaultModel
         let processedMessages = sanitizeInput
             ? messages.map { GroqMessage(role: $0.role, content: GroqPromptSanitizer.sanitize($0.content)) }
@@ -330,6 +273,7 @@ public final class GroqClient: @unchecked Sendable {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
+                    try validateParameters(temperature: temperature, maxTokens: maxTokens, topP: topP)
                     let resolvedModel = model ?? configuration.defaultModel
                     let processedMessages = sanitizeInput
                         ? messages.map { GroqMessage(role: $0.role, content: GroqPromptSanitizer.sanitize($0.content)) }
@@ -351,7 +295,7 @@ public final class GroqClient: @unchecked Sendable {
                     let urlRequest = try buildURLRequest(from: request)
                     let (bytes, response) = try await session.bytes(for: urlRequest)
 
-                    try validateHTTPResponse(response)
+                    try validateHTTPResponse(response, data: Data())
 
                     for try await line in bytes.lines {
                         guard !Task.isCancelled else { break }
@@ -374,6 +318,7 @@ public final class GroqClient: @unchecked Sendable {
                     await rateLimiter.recordRequest(model: resolvedModel, tokenCount: tokenEstimate)
                     continuation.finish()
                 } catch {
+                    logger.error("Stream error: \(error.localizedDescription)")
                     continuation.finish(throwing: error)
                 }
             }
@@ -434,6 +379,7 @@ public final class GroqClient: @unchecked Sendable {
 
     private func executeWithRetry(_ request: GroqChatRequest, model: String) async throws -> GroqChatResponse {
         var lastError: GroqError?
+        logger.debug("Starting request for model: \(model), messages: \(request.messages.count)")
 
         for attempt in 0...retryPolicy.maxRetries {
             do {
@@ -444,6 +390,7 @@ public final class GroqClient: @unchecked Sendable {
                     model: model,
                     tokenCount: response.usage?.totalTokens ?? tokenEstimate
                 )
+                logger.info("Request completed: \(model), tokens: \(response.usage?.totalTokens ?? tokenEstimate)")
                 return response
             } catch let error as GroqError {
                 lastError = error
@@ -454,13 +401,21 @@ public final class GroqClient: @unchecked Sendable {
                     } else {
                         delay = retryPolicy.delay(for: attempt)
                     }
+                    let maxAttempts = self.retryPolicy.maxRetries
+                    let delayStr = String(format: "%.1f", delay)
+                    let errorMsg = error.errorDescription ?? "unknown"
+                    logger.warning(
+                        "Retry \(attempt + 1)/\(maxAttempts) after \(delayStr)s: \(errorMsg)"
+                    )
                     try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
                     continue
                 }
+                logger.error("Request failed: \(error.errorDescription ?? "unknown")")
                 throw error
             }
         }
 
+        logger.error("All retry attempts exhausted for model: \(model)")
         throw lastError ?? GroqError.invalidResponse
     }
 
@@ -472,12 +427,14 @@ public final class GroqClient: @unchecked Sendable {
             (data, response) = try await session.data(for: urlRequest)
         } catch {
             if let urlError = error as? URLError, urlError.code == .timedOut {
+                logger.error("Request timed out")
                 throw GroqError.requestTimedOut
             }
+            logger.error("Network error: \(error.localizedDescription)")
             throw GroqError.networkError(error.localizedDescription)
         }
 
-        try validateHTTPResponse(response)
+        try validateHTTPResponse(response, data: data)
 
         do {
             return try JSONDecoder().decode(GroqChatResponse.self, from: data)
@@ -500,13 +457,13 @@ public final class GroqClient: @unchecked Sendable {
         do {
             urlRequest.httpBody = try JSONEncoder().encode(request)
         } catch {
-            throw GroqError.invalidResponse
+            throw GroqError.invalidRequest("Failed to encode request body: \(error.localizedDescription)")
         }
 
         return urlRequest
     }
 
-    private func validateHTTPResponse(_ response: URLResponse) throws {
+    private func validateHTTPResponse(_ response: URLResponse, data: Data) throws {
         guard let httpResponse = response as? HTTPURLResponse else {
             throw GroqError.invalidResponse
         }
@@ -522,12 +479,27 @@ public final class GroqClient: @unchecked Sendable {
             let retryAfter = httpResponse.value(forHTTPHeaderField: "Retry-After").flatMap { Int($0) }
             throw GroqError.rateLimited(retryAfter: retryAfter)
         default:
-            throw GroqError.serverError(statusCode: httpResponse.statusCode)
+            let message = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            let errorMessage = message?["error"] as? [String: Any]
+            let detail = errorMessage?["message"] as? String
+            throw GroqError.serverError(statusCode: httpResponse.statusCode, message: detail)
         }
     }
 
     private func estimateTokens(for messages: [GroqMessage]) -> Int {
-        let totalChars = messages.reduce(0) { $0 + $1.content.count }
-        return max(1, totalChars / 4)
+        let combinedText = messages.map(\.content).joined()
+        return GroqTokenEstimator.estimate(text: combinedText)
+    }
+
+    private func validateParameters(temperature: Double?, maxTokens: Int?, topP: Double?) throws {
+        if let temperature, temperature < 0 || temperature > 2 {
+            throw GroqError.invalidRequest("Temperature must be between 0 and 2, got \(temperature)")
+        }
+        if let maxTokens, maxTokens <= 0 {
+            throw GroqError.invalidRequest("maxTokens must be greater than 0, got \(maxTokens)")
+        }
+        if let topP, topP < 0 || topP > 1 {
+            throw GroqError.invalidRequest("topP must be between 0 and 1, got \(topP)")
+        }
     }
 }

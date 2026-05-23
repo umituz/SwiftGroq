@@ -111,28 +111,22 @@ public struct ModelRateLimits: Sendable {
     public let tpm: Int
     public let dailyRequests: Int
 
+    private static let defaults = ModelRateLimits(tpm: 12000, dailyRequests: 6000)
+
+    private static let limits: [GroqModel: ModelRateLimits] = [
+        .llama33_70b: ModelRateLimits(tpm: 12000, dailyRequests: 6000),
+        .llama31_8b: ModelRateLimits(tpm: 6000, dailyRequests: 6000),
+        .llama32_1b: ModelRateLimits(tpm: 6000, dailyRequests: 6000),
+        .llama32_3b: ModelRateLimits(tpm: 6000, dailyRequests: 6000),
+        .llama32_11b_vision: ModelRateLimits(tpm: 12000, dailyRequests: 6000),
+        .llama32_90b_vision: ModelRateLimits(tpm: 12000, dailyRequests: 6000),
+        .mixtral8x7b: ModelRateLimits(tpm: 6000, dailyRequests: 6000),
+        .gemma2_9b: ModelRateLimits(tpm: 6000, dailyRequests: 6000),
+        .deepseekR1_70b: ModelRateLimits(tpm: 12000, dailyRequests: 6000)
+    ]
+
     public static func limit(for model: String) -> ModelRateLimits {
-        switch model {
-        case GroqModel.llama33_70b.rawValue:
-            return ModelRateLimits(tpm: 12000, dailyRequests: 6000)
-        case GroqModel.llama31_8b.rawValue:
-            return ModelRateLimits(tpm: 6000, dailyRequests: 6000)
-        case GroqModel.llama32_1b.rawValue:
-            return ModelRateLimits(tpm: 6000, dailyRequests: 6000)
-        case GroqModel.llama32_3b.rawValue:
-            return ModelRateLimits(tpm: 6000, dailyRequests: 6000)
-        case GroqModel.llama32_11b_vision.rawValue:
-            return ModelRateLimits(tpm: 12000, dailyRequests: 6000)
-        case GroqModel.llama32_90b_vision.rawValue:
-            return ModelRateLimits(tpm: 12000, dailyRequests: 6000)
-        case GroqModel.mixtral8x7b.rawValue:
-            return ModelRateLimits(tpm: 6000, dailyRequests: 6000)
-        case GroqModel.gemma2_9b.rawValue:
-            return ModelRateLimits(tpm: 6000, dailyRequests: 6000)
-        case GroqModel.deepseekR1_70b.rawValue:
-            return ModelRateLimits(tpm: 12000, dailyRequests: 6000)
-        default:
-            return ModelRateLimits(tpm: 12000, dailyRequests: 6000)
-        }
+        guard let groqModel = GroqModel(rawValue: model) else { return defaults }
+        return limits[groqModel] ?? defaults
     }
 }

@@ -4,10 +4,11 @@ public enum GroqError: LocalizedError, Sendable {
     case notConfigured
     case missingAPIKey
     case invalidURL
+    case invalidRequest(String)
     case unauthorized
     case rateLimited(retryAfter: Int?)
     case insufficientQuota
-    case serverError(statusCode: Int)
+    case serverError(statusCode: Int, message: String?)
     case networkError(String)
     case invalidResponse
     case emptyResponse
@@ -23,13 +24,18 @@ public enum GroqError: LocalizedError, Sendable {
             return "Groq API key is not configured."
         case .invalidURL:
             return "Invalid API URL."
+        case .invalidRequest(let reason):
+            return "Invalid request: \(reason)"
         case .unauthorized:
             return "Invalid API key. Check your Groq API key in console.groq.com."
         case .rateLimited:
             return "Rate limit reached. Please try again in a moment."
         case .insufficientQuota:
             return "API quota exceeded. Check your plan at console.groq.com."
-        case .serverError(let code):
+        case .serverError(let code, let message):
+            if let message {
+                return "Server error (HTTP \(code)): \(message)"
+            }
             return "Server error (HTTP \(code)). The service may be temporarily unavailable."
         case .networkError(let description):
             return "Network error: \(description)"
@@ -52,6 +58,8 @@ public enum GroqError: LocalizedError, Sendable {
             return "Call GroqClient.configure() before making requests."
         case .missingAPIKey:
             return "Configure the API key using GroqClient.configure(apiKeySource:) before making requests."
+        case .invalidRequest:
+            return "Check your request parameters and try again."
         case .unauthorized:
             return "Verify your API key is correct at console.groq.com/keys."
         case .rateLimited(let retryAfter):
@@ -82,7 +90,8 @@ public enum GroqError: LocalizedError, Sendable {
         switch self {
         case .rateLimited, .serverError, .networkError, .requestTimedOut, .streamError:
             return true
-        default:
+        case .invalidRequest, .notConfigured, .missingAPIKey, .invalidURL, .unauthorized,
+             .insufficientQuota, .invalidResponse, .emptyResponse, .decodingFailed:
             return false
         }
     }
@@ -91,7 +100,9 @@ public enum GroqError: LocalizedError, Sendable {
         switch self {
         case .notConfigured, .missingAPIKey, .unauthorized:
             return true
-        default:
+        case .invalidURL, .invalidRequest, .rateLimited, .insufficientQuota,
+             .serverError, .networkError, .invalidResponse, .emptyResponse,
+             .decodingFailed, .requestTimedOut, .streamError:
             return false
         }
     }

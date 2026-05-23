@@ -2,6 +2,8 @@ import Foundation
 import Security
 
 public struct GroqConfiguration: Sendable {
+    public static let defaultBaseURL = "https://api.groq.com/openai/v1/chat/completions"
+
     public let apiKey: String
     public let baseURL: String
     public let defaultModel: String
@@ -11,7 +13,7 @@ public struct GroqConfiguration: Sendable {
 
     public init(
         apiKey: String,
-        baseURL: String = "https://api.groq.com/openai/v1/chat/completions",
+        baseURL: String = GroqConfiguration.defaultBaseURL,
         defaultModel: String = GroqModel.llama33_70b.rawValue,
         defaultTemperature: Double = 0.7,
         defaultMaxTokens: Int = 1024,
@@ -49,28 +51,35 @@ public enum GroqAPIKeySource {
     }
 }
 
-enum KeychainHelper {
-    static func save(key: String, value: String) -> Bool {
+public enum KeychainHelper {
+    private static let serviceIdentifier = "com.umituz.swiftgroq"
+
+    @discardableResult
+    public static func save(key: String, value: String) -> Bool {
         guard let data = value.data(using: .utf8) else { return false }
 
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: serviceIdentifier,
             kSecAttrAccount as String: key
         ]
         SecItemDelete(query as CFDictionary)
 
         let attributes: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: serviceIdentifier,
             kSecAttrAccount as String: key,
-            kSecValueData as String: data
+            kSecValueData as String: data,
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock
         ]
         let status = SecItemAdd(attributes as CFDictionary, nil)
         return status == errSecSuccess
     }
 
-    static func load(key: String) -> String? {
+    public static func load(key: String) -> String? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: serviceIdentifier,
             kSecAttrAccount as String: key,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne
@@ -82,9 +91,11 @@ enum KeychainHelper {
         return String(data: data, encoding: .utf8)
     }
 
-    static func delete(key: String) -> Bool {
+    @discardableResult
+    public static func delete(key: String) -> Bool {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: serviceIdentifier,
             kSecAttrAccount as String: key
         ]
         let status = SecItemDelete(query as CFDictionary)

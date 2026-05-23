@@ -166,3 +166,49 @@ public struct GroqDelta: Codable, Sendable {
     public let role: GroqRole?
     public let content: String?
 }
+
+public struct GroqTokenUsage: Codable, Sendable, Equatable {
+    public let inputTokens: Int
+    public let outputTokens: Int
+
+    public var totalTokens: Int { inputTokens + outputTokens }
+
+    public init(inputTokens: Int, outputTokens: Int) {
+        self.inputTokens = inputTokens
+        self.outputTokens = outputTokens
+    }
+}
+
+public enum GroqTokenEstimator {
+    public static func estimate(text: String) -> Int {
+        max(1, text.count / 4)
+    }
+
+    public static func estimateRequest(
+        systemPrompt: String,
+        history: [GroqMessage],
+        userMessage: String
+    ) -> GroqTokenUsage {
+        let input = estimate(text: systemPrompt)
+            + history.reduce(0) { $0 + estimate(text: $1.content) }
+            + estimate(text: userMessage)
+        return GroqTokenUsage(inputTokens: input, outputTokens: 0)
+    }
+
+    public static func estimateFullUsage(
+        systemPrompt: String,
+        history: [GroqMessage],
+        userMessage: String,
+        response: String
+    ) -> GroqTokenUsage {
+        let request = estimateRequest(
+            systemPrompt: systemPrompt,
+            history: history,
+            userMessage: userMessage
+        )
+        return GroqTokenUsage(
+            inputTokens: request.inputTokens,
+            outputTokens: estimate(text: response)
+        )
+    }
+}
