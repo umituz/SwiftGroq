@@ -231,6 +231,7 @@ public enum GroqModel: String, Sendable, CaseIterable {
     case mixtral8x7b = "mixtral-8x7b-32768"
     case gemma2_9b = "gemma2-9b-it"
     case deepseekR1_70b = "deepseek-r1-distill-llama-70b"
+    case llama4_scout_17b_16e_instruct = "meta-llama/llama-4-scout-17b-16e-instruct"
 }
 
 public struct GroqStreamChunk: Codable, Sendable {
