@@ -244,7 +244,7 @@ public final class GroqClient: @unchecked Sendable {
 
         let resolvedModel = model ?? configuration.defaultModel
         let processedMessages = sanitizeInput
-            ? messages.map { GroqMessage(role: $0.role, content: GroqPromptSanitizer.sanitize($0.content)) }
+            ? messages.map { GroqMessage(role: $0.role, content: sanitizeMessageContent($0.content)) }
             : messages
 
         let request = GroqChatRequest(
@@ -276,7 +276,7 @@ public final class GroqClient: @unchecked Sendable {
                     try validateParameters(temperature: temperature, maxTokens: maxTokens, topP: topP)
                     let resolvedModel = model ?? configuration.defaultModel
                     let processedMessages = sanitizeInput
-                        ? messages.map { GroqMessage(role: $0.role, content: GroqPromptSanitizer.sanitize($0.content)) }
+                        ? messages.map { GroqMessage(role: $0.role, content: sanitizeMessageContent($0.content)) }
                         : messages
 
                     let request = GroqChatRequest(
@@ -487,8 +487,32 @@ public final class GroqClient: @unchecked Sendable {
     }
 
     private func estimateTokens(for messages: [GroqMessage]) -> Int {
-        let combinedText = messages.map(\.content).joined()
+        let combinedText = messages.map { extractText(from: $0.content) }.joined()
         return GroqTokenEstimator.estimate(text: combinedText)
+    }
+
+    private func extractText(from content: MessageContent) -> String {
+        switch content {
+        case .text(let text):
+            return text
+        case .array(let contents):
+            return contents.compactMap { $0.text }.joined()
+        }
+    }
+
+    private func sanitizeMessageContent(_ content: MessageContent) -> MessageContent {
+        switch content {
+        case .text(let text):
+            return .text(GroqPromptSanitizer.sanitize(text))
+        case .array(let contents):
+            return .array(contents.map { currentContent in
+                if currentContent.text != nil {
+                    return GroqVisionContent.text(GroqPromptSanitizer.sanitize(currentContent.text!))
+                } else {
+                    return currentContent // Don't sanitize image URLs
+                }
+            })
+        }
     }
 
     private func validateParameters(temperature: Double?, maxTokens: Int?, topP: Double?) throws {
@@ -501,5 +525,67 @@ public final class GroqClient: @unchecked Sendable {
         if let topP, topP < 0 || topP > 1 {
             throw GroqError.invalidRequest("topP must be between 0 and 1, got \(topP)")
         }
+    }
+
+    // MARK: - Vision API
+
+    /// Sends a vision request with image and text content
+    public func chatWithVision(
+        systemPrompt: String,
+        userMessage: String,
+        imageURL: String,
+        model: String? = nil,
+        temperature: Double? = nil,
+        maxTokens: Int? = nil,
+        responseFormat: GroqResponseFormat? = nil
+    ) async throws -> String {
+        let visionContents: [GroqVisionContent] = [
+            .text(userMessage),
+            .image(url: imageURL)
+        ]
+
+        let messages: [GroqMessage] = [
+            GroqMessage(role: .system, content: systemPrompt),
+            GroqMessage(role: .user, visionContents: visionContents)
+        ]
+
+        return try await chat(
+            messages: messages,
+            model: model,
+            temperature: temperature,
+            maxTokens: maxTokens,
+            responseFormat: responseFormat,
+            sanitizeInput: false // Don't sanitize vision content
+        )
+    }
+
+    /// Sends a vision request and decodes the response
+    public func decodeWithVision<T: Decodable>(
+        _ type: T.Type,
+        systemPrompt: String,
+        userMessage: String,
+        imageURL: String,
+        model: String? = nil,
+        temperature: Double? = nil,
+        maxTokens: Int? = nil
+    ) async throws -> T {
+        let visionContents: [GroqVisionContent] = [
+            .text(userMessage),
+            .image(url: imageURL)
+        ]
+
+        let messages: [GroqMessage] = [
+            GroqMessage(role: .system, content: systemPrompt),
+            GroqMessage(role: .user, visionContents: visionContents)
+        ]
+
+        return try await decode(
+            type,
+            messages: messages,
+            model: model,
+            temperature: temperature,
+            maxTokens: maxTokens,
+            sanitizeInput: false // Don't sanitize vision content
+        )
     }
 }

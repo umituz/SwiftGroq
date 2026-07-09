@@ -1,10 +1,47 @@
 import Foundation
 
+// MARK: - Vision Content Support
+
+public struct GroqVisionContent: Codable, Equatable, Sendable {
+    public let type: String
+    public let text: String?
+    public let imageUrl: GroqImageURL?
+
+    private enum CodingKeys: String, CodingKey {
+        case type, text, imageUrl = "image_url"
+    }
+
+    public static func text(_ text: String) -> GroqVisionContent {
+        GroqVisionContent(type: "text", text: text, imageUrl: nil)
+    }
+
+    public static func image(url: String) -> GroqVisionContent {
+        GroqVisionContent(type: "image_url", text: nil, imageUrl: GroqImageURL(url: url))
+    }
+}
+
+public struct GroqImageURL: Codable, Equatable, Sendable {
+    public let url: String
+    public init(url: String) { self.url = url }
+}
+
+// MARK: - Groq Message
+
 public struct GroqMessage: Codable, Equatable, Sendable {
     public let role: GroqRole
-    public let content: String
+    public let content: MessageContent
 
     public init(role: GroqRole, content: String) {
+        self.role = role
+        self.content = .text(content)
+    }
+
+    public init(role: GroqRole, visionContents: [GroqVisionContent]) {
+        self.role = role
+        self.content = .array(visionContents)
+    }
+
+    public init(role: GroqRole, content: MessageContent) {
         self.role = role
         self.content = content
     }
@@ -13,17 +50,68 @@ public struct GroqMessage: Codable, Equatable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let rawRole = try container.decode(String.self, forKey: .role)
         self.role = GroqRole(rawValue: rawRole) ?? .user
-        self.content = try container.decode(String.self, forKey: .content)
+
+        // Try to decode as String first, then as Array
+        if let textContent = try? container.decode(String.self, forKey: .content) {
+            self.content = .text(textContent)
+        } else if let arrayContent = try? container.decode([GroqVisionContent].self, forKey: .content) {
+            self.content = .array(arrayContent)
+        } else {
+            self.content = .text("")
+        }
     }
 
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(role.rawValue, forKey: .role)
-        try container.encode(content, forKey: .content)
+
+        switch content {
+        case .text(let text):
+            try container.encode(text, forKey: .content)
+        case .array(let array):
+            try container.encode(array, forKey: .content)
+        }
     }
 
     private enum CodingKeys: String, CodingKey {
         case role, content
+    }
+}
+
+public enum MessageContent: Codable, Equatable, Sendable {
+    case text(String)
+    case array([GroqVisionContent])
+
+    public static func == (lhs: MessageContent, rhs: MessageContent) -> Bool {
+        switch (lhs, rhs) {
+        case (.text(let lhsText), .text(let rhsText)):
+            return lhsText == rhsText
+        case (.array(let lhsArray), .array(let rhsArray)):
+            return lhsArray == rhsArray
+        default:
+            return false
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case .text(let text):
+            try container.encode(text)
+        case .array(let array):
+            try container.encode(array)
+        }
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let text = try? container.decode(String.self) {
+            self = .text(text)
+        } else if let array = try? container.decode([GroqVisionContent].self) {
+            self = .array(array)
+        } else {
+            self = .text("")
+        }
     }
 }
 
@@ -100,7 +188,9 @@ public struct GroqChatResponse: Codable, Sendable {
     public let usage: GroqUsage?
 
     public var text: String? {
-        choices.first?.message.content
+        guard let content = choices.first?.message.content,
+              case .text(let text) = content else { return nil }
+        return text
     }
 }
 
@@ -190,9 +280,18 @@ public enum GroqTokenEstimator {
         userMessage: String
     ) -> GroqTokenUsage {
         let input = estimate(text: systemPrompt)
-            + history.reduce(0) { $0 + estimate(text: $1.content) }
+            + history.reduce(0) { $0 + estimate(text: extractText(from: $1.content)) }
             + estimate(text: userMessage)
         return GroqTokenUsage(inputTokens: input, outputTokens: 0)
+    }
+
+    private static func extractText(from content: MessageContent) -> String {
+        switch content {
+        case .text(let text):
+            return text
+        case .array(let contents):
+            return contents.compactMap { $0.text }.joined()
+        }
     }
 
     public static func estimateFullUsage(
