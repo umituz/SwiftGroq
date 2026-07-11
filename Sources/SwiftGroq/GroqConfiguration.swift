@@ -33,6 +33,17 @@ public enum GroqAPIKeySource {
     case environment(variable: String = "GROQ_API_KEY")
     case infoPlist(key: String = "GROQ_API_KEY")
     case keychain(account: String = "com.umituz.swiftgroq")
+    /// Try each source in order, returning the first non-empty value.
+    ///
+    /// Use this to make configuration robust across environments. For example,
+    /// `.any([.infoPlist(), .environment()])` resolves the key from the app bundle
+    /// (baked into the binary at build time, so it works in TestFlight / App Review
+    /// builds) while still falling back to the process environment during local
+    /// development. Relying on a single source such as `.environment` alone is a
+    /// common pitfall: `ProcessInfo.processInfo.environment` is only populated when
+    /// the app is launched from a shell that exports the variable, so it is empty in
+    /// release/device builds and leaves the client unconfigured.
+    case any([GroqAPIKeySource])
 
     public func resolve() -> String? {
         switch self {
@@ -40,13 +51,23 @@ public enum GroqAPIKeySource {
             return value.isEmpty ? nil : value
 
         case .environment(let variable):
-            return ProcessInfo.processInfo.environment[variable]
+            let value = ProcessInfo.processInfo.environment[variable]
+            return (value?.isEmpty ?? true) ? nil : value
 
         case .infoPlist(let key):
-            return Bundle.main.infoDictionary?[key] as? String
+            let value = Bundle.main.infoDictionary?[key] as? String
+            return (value?.isEmpty ?? true) ? nil : value
 
         case .keychain(let account):
             return KeychainHelper.load(key: account)
+
+        case .any(let sources):
+            for source in sources {
+                if let resolved = source.resolve(), !resolved.isEmpty {
+                    return resolved
+                }
+            }
+            return nil
         }
     }
 }

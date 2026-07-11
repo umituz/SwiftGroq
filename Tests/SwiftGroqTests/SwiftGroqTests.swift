@@ -20,7 +20,7 @@ struct GroqModelsTests {
         let jsonData = Data("{\"role\":\"assistant\",\"content\":\"Hi\"}".utf8)
         let message = try JSONDecoder().decode(GroqMessage.self, from: jsonData)
         #expect(message.role == .assistant)
-        #expect(message.content == "Hi")
+        #expect(message.content == .text("Hi"))
     }
 
     @Test("GroqMessage decodes unknown role as user")
@@ -126,7 +126,7 @@ struct GroqModelsTests {
 
     @Test("GroqModel is CaseIterable")
     func modelCaseIterable() {
-        #expect(GroqModel.allCases.count == 9)
+        #expect(GroqModel.allCases.count == 10)
     }
 
     @Test("GroqFinishReason decodes from string values")
@@ -522,6 +522,25 @@ struct GroqConfigurationTests {
     func infoPlistDefaultKey() {
         let source = GroqAPIKeySource.infoPlist()
         #expect(source.resolve() == Bundle.main.infoDictionary?["GROQ_API_KEY"] as? String)
+    }
+
+    @Test("API key source .any returns first non-empty value")
+    func anySourceReturnsFirstNonEmpty() {
+        let source = GroqAPIKeySource.any([
+            .key(""),
+            .key("fallback-key"),
+            .key("ignored-key")
+        ])
+        #expect(source.resolve() == "fallback-key")
+    }
+
+    @Test("API key source .any returns nil when every source is empty")
+    func anySourceReturnsNilWhenAllEmpty() {
+        let source = GroqAPIKeySource.any([
+            .key(""),
+            .environment(variable: "NONEXISTENT_VAR_12345")
+        ])
+        #expect(source.resolve() == nil)
     }
 }
 
