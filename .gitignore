@@ -1,3 +1,5 @@
+*.xcworkspace
+*.xcodeproj
 # Build artifacts
 .build/
 build/
