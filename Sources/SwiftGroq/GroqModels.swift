@@ -222,16 +222,25 @@ public struct GroqUsage: Codable, Sendable {
 }
 
 public enum GroqModel: String, Sendable, CaseIterable {
+    /// Üretim ortağı — genel amaçlı chat default'u.
     case llama33_70b = "llama-3.3-70b-versatile"
+    /// Hafif ve hızlı — kısa yanıtlar/etiketleme.
     case llama31_8b = "llama-3.1-8b-instant"
-    case llama32_1b = "llama-3.2-1b-preview"
-    case llama32_3b = "llama-3.2-3b-preview"
-    case llama32_11b_vision = "llama-3.2-11b-vision-preview"
-    case llama32_90b_vision = "llama-3.2-90b-vision-preview"
-    case mixtral8x7b = "mixtral-8x7b-32768"
-    case gemma2_9b = "gemma2-9b-it"
-    case deepseekR1_70b = "deepseek-r1-distill-llama-70b"
-    case llama4_scout_17b_16e_instruct = "meta-llama/llama-4-scout-17b-16e-instruct"
+    /// Llama 4 Scout — çok modlu (vision + text).
+    case llama4_scout = "meta-llama/llama-4-scout-17b-16e-instruct"
+    /// Llama 4 Maverick — MoE, Scout'tan güçlü genel/model.
+    case llama4_maverick = "meta-llama/llama-4-maverick-17b-128e-instruct"
+    /// OpenAI GPT-OSS 120B — Groq üzerinde en güçlü açık model.
+    case gptOss120b = "openai/gpt-oss-120b"
+    /// OpenAI GPT-OSS 20B — düşük gecikmeli akıl yürütme.
+    case gptOss20b = "openai/gpt-oss-20b"
+    /// Qwen 3 32B — çok dilli (CJK dahil) güçlü orta sınıf.
+    case qwen3_32b = "qwen/qwen3-32b"
+    /// Moonshot Kimi K2 — uzun bağlam agent/öneri işleri.
+    case kimiK2 = "moonshotai/kimi-k2-instruct-0905"
+
+    /// Vision (görüntü+metin) istekleri için önerilen güncel model.
+    public static var visionDefault: GroqModel { .llama4_scout }
 }
 
 public struct GroqStreamChunk: Codable, Sendable {

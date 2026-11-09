@@ -27,12 +27,9 @@ identifier_name:
     - id
     - llama33_70b
     - llama31_8b
-    - llama32_1b
-    - llama32_3b
-    - llama32_11b_vision
-    - llama32_90b_vision
-    - gemma2_9b
-    - deepseekR1_70b
+    - llama4_scout
+    - llama4_maverick
+    - qwen3_32b
 
 type_body_length:
   warning: 500

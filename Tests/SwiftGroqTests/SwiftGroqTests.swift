@@ -115,18 +115,18 @@ struct GroqModelsTests {
     func allModelsAvailable() {
         #expect(GroqModel.llama33_70b.rawValue == "llama-3.3-70b-versatile")
         #expect(GroqModel.llama31_8b.rawValue == "llama-3.1-8b-instant")
-        #expect(GroqModel.llama32_1b.rawValue == "llama-3.2-1b-preview")
-        #expect(GroqModel.llama32_3b.rawValue == "llama-3.2-3b-preview")
-        #expect(GroqModel.llama32_11b_vision.rawValue == "llama-3.2-11b-vision-preview")
-        #expect(GroqModel.llama32_90b_vision.rawValue == "llama-3.2-90b-vision-preview")
-        #expect(GroqModel.mixtral8x7b.rawValue == "mixtral-8x7b-32768")
-        #expect(GroqModel.gemma2_9b.rawValue == "gemma2-9b-it")
-        #expect(GroqModel.deepseekR1_70b.rawValue == "deepseek-r1-distill-llama-70b")
+        #expect(GroqModel.llama4_scout.rawValue == "meta-llama/llama-4-scout-17b-16e-instruct")
+        #expect(GroqModel.llama4_maverick.rawValue == "meta-llama/llama-4-maverick-17b-128e-instruct")
+        #expect(GroqModel.gptOss120b.rawValue == "openai/gpt-oss-120b")
+        #expect(GroqModel.gptOss20b.rawValue == "openai/gpt-oss-20b")
+        #expect(GroqModel.qwen3_32b.rawValue == "qwen/qwen3-32b")
+        #expect(GroqModel.kimiK2.rawValue == "moonshotai/kimi-k2-instruct-0905")
+        #expect(GroqModel.visionDefault == .llama4_scout)
     }
 
     @Test("GroqModel is CaseIterable")
     func modelCaseIterable() {
-        #expect(GroqModel.allCases.count == 10)
+        #expect(GroqModel.allCases.count == 8)
     }
 
     @Test("GroqFinishReason decodes from string values")

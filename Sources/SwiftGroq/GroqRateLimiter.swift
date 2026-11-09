@@ -116,13 +116,12 @@ public struct ModelRateLimits: Sendable {
     private static let limits: [GroqModel: ModelRateLimits] = [
         .llama33_70b: ModelRateLimits(tpm: 12000, dailyRequests: 6000),
         .llama31_8b: ModelRateLimits(tpm: 6000, dailyRequests: 6000),
-        .llama32_1b: ModelRateLimits(tpm: 6000, dailyRequests: 6000),
-        .llama32_3b: ModelRateLimits(tpm: 6000, dailyRequests: 6000),
-        .llama32_11b_vision: ModelRateLimits(tpm: 12000, dailyRequests: 6000),
-        .llama32_90b_vision: ModelRateLimits(tpm: 12000, dailyRequests: 6000),
-        .mixtral8x7b: ModelRateLimits(tpm: 6000, dailyRequests: 6000),
-        .gemma2_9b: ModelRateLimits(tpm: 6000, dailyRequests: 6000),
-        .deepseekR1_70b: ModelRateLimits(tpm: 12000, dailyRequests: 6000)
+        .llama4_scout: ModelRateLimits(tpm: 12000, dailyRequests: 6000),
+        .llama4_maverick: ModelRateLimits(tpm: 12000, dailyRequests: 6000),
+        .gptOss120b: ModelRateLimits(tpm: 12000, dailyRequests: 6000),
+        .gptOss20b: ModelRateLimits(tpm: 6000, dailyRequests: 6000),
+        .qwen3_32b: ModelRateLimits(tpm: 12000, dailyRequests: 6000),
+        .kimiK2: ModelRateLimits(tpm: 12000, dailyRequests: 6000)
     ]
 
     public static func limit(for model: String) -> ModelRateLimits {
